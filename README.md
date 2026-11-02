@@ -36,7 +36,7 @@
 - 📊 **Tons of Advices & Statistics:** 
   - Dynamic charts and visual breakdowns of spending habits.
   - Smart financial tips and personalized advice based on historical spending data.
-- 📁 **Data Export (Excel):** Export your transaction history to `.xlsx` and send it anywhere with the native share sheet. Legacy `.xls` is planned.
+- 📁 **Excel Backup (Export & Import):** Export your history to `.xlsx` and share it anywhere with the native share sheet. Import a PocketFin backup later — existing entries are kept and exact duplicates are skipped. Legacy `.xls` is planned.
 - 🚀 **Lightweight & Fast:** Optimized for low memory footprint and high performance across both iOS and Android.
 
 ---
@@ -130,7 +130,12 @@ lib/
 flutter analyze                 # Static analysis
 flutter test                    # Unit and widget tests
 dart run build_runner build     # Regenerate Drift code after schema changes
+flutter build apk --release     # Android release APK
+flutter build linux --release   # Linux desktop build
 ```
+
+The database is a real SQLite file (`pocketfin.sqlite`) opened through Drift
+with WAL mode enabled. On Android it lives in the app's documents directory.
 
 ---
 

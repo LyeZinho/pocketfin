@@ -24,6 +24,20 @@ enum TxCategory {
     return TxCategory.other;
   }
 
+  /// Accepts either the enum name (`food`) or the display label (`Food`).
+  static TxCategory? tryParse(String value) {
+    final normalized = value.trim().toLowerCase();
+    if (normalized.isEmpty) return null;
+    for (final category in values) {
+      if (category.name == normalized ||
+          category.label.toLowerCase() == normalized) {
+        return category;
+      }
+    }
+    if (normalized == 'income') return salary;
+    return null;
+  }
+
   static List<TxCategory> forType(TxType type) {
     return switch (type) {
       TxType.expense => const [

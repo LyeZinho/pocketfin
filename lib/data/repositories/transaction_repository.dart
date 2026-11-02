@@ -2,6 +2,7 @@ import 'package:drift/drift.dart';
 
 import '../../core/constants/categories.dart';
 import '../local/app_database.dart';
+import '../models/imported_transaction.dart';
 
 class TransactionRepository {
   TransactionRepository(this._db);
@@ -28,6 +29,7 @@ class TransactionRepository {
   Future<int> setMonthlyBudget(int cents) async {
     await _db.into(_db.appSettings).insertOnConflictUpdate(
           AppSettingsCompanion.insert(
+            id: const Value(1),
             monthlyBudgetCents: Value(cents),
           ),
         );
@@ -59,5 +61,65 @@ class TransactionRepository {
         .go();
   }
 
+  /// Inserts imported entries, skipping exact duplicates already in the
+  /// database. Returns how many rows were actually inserted.
+  Future<int> importEntries(List<ImportedTransaction> entries) {
+    if (entries.isEmpty) return Future.value(0);
+
+    return _db.transaction(() async {
+      final existing = await _db.select(_db.transactionEntries).get();
+      final seen = existing
+          .map(
+            (entry) => _dedupeKey(
+              title: entry.title,
+              category: entry.category,
+              type: entry.type,
+              amountCents: entry.amountCents,
+              occurredAt: entry.occurredAt,
+            ),
+          )
+          .toSet();
+
+      final companions = <TransactionEntriesCompanion>[];
+      for (final entry in entries) {
+        final key = _dedupeKey(
+          title: entry.title,
+          category: entry.category.name,
+          type: entry.type.name,
+          amountCents: entry.amountCents,
+          occurredAt: entry.occurredAt,
+        );
+        if (!seen.add(key)) continue;
+        companions.add(
+          TransactionEntriesCompanion.insert(
+            title: entry.title,
+            category: entry.category.name,
+            type: entry.type.name,
+            amountCents: entry.amountCents,
+            note: Value(entry.note),
+            occurredAt: entry.occurredAt,
+          ),
+        );
+      }
+
+      if (companions.isEmpty) return 0;
+      await _db.batch((batch) {
+        batch.insertAll(_db.transactionEntries, companions);
+      });
+      return companions.length;
+    });
+  }
+
   Future<void> clear() => _db.delete(_db.transactionEntries).go();
+
+  String _dedupeKey({
+    required String title,
+    required String category,
+    required String type,
+    required int amountCents,
+    required DateTime occurredAt,
+  }) {
+    return '${title.trim().toLowerCase()}|$category|$type|$amountCents|'
+        '${occurredAt.toIso8601String()}';
+  }
 }

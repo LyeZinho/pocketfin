@@ -24,10 +24,38 @@ class AppSettings extends Table {
 
 @DriftDatabase(tables: [TransactionEntries, AppSettings])
 class AppDatabase extends _$AppDatabase {
-  AppDatabase() : super(driftDatabase(name: 'pocketfin'));
+  AppDatabase()
+      : super(
+          driftDatabase(
+            name: 'pocketfin',
+            native: DriftNativeOptions(
+              shareAcrossIsolates: true,
+              setup: (database) {
+                // WAL keeps reads fast while a write is in progress.
+                database.execute('PRAGMA journal_mode = WAL');
+                database.execute('PRAGMA synchronous = NORMAL');
+              },
+            ),
+          ),
+        );
 
   AppDatabase.forTesting(super.executor);
 
   @override
   int get schemaVersion => 1;
+
+  @override
+  MigrationStrategy get migration => MigrationStrategy(
+        onCreate: (migrator) async {
+          await migrator.createAll();
+          await into(appSettings).insert(
+            AppSettingsCompanion.insert(
+              monthlyBudgetCents: const Value(125000),
+            ),
+          );
+        },
+        beforeOpen: (details) async {
+          await customStatement('PRAGMA foreign_keys = ON');
+        },
+      );
 }

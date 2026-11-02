@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../data/local/app_database.dart';
 import '../data/repositories/transaction_repository.dart';
 import '../data/services/export_service.dart';
+import '../data/services/import_service.dart';
 import 'analytics.dart';
 
 final nowProvider = Provider<DateTime>((ref) => DateTime.now());
@@ -27,6 +28,10 @@ final monthlyBudgetProvider = StreamProvider<int>((ref) {
 
 final exportServiceProvider = Provider<ExportService>((ref) {
   return ExportService();
+});
+
+final importServiceProvider = Provider<ImportService>((ref) {
+  return ImportService();
 });
 
 class SelectedMonthNotifier extends Notifier<DateTime> {

@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:pocketfin/app.dart';
 import 'package:pocketfin/core/constants/categories.dart';
 import 'package:pocketfin/data/local/app_database.dart';
+import 'package:pocketfin/data/models/imported_transaction.dart';
 import 'package:pocketfin/data/repositories/transaction_repository.dart';
 import 'package:pocketfin/logic/providers.dart';
 
@@ -40,6 +41,9 @@ class _FakeRepository implements TransactionRepository {
     saved.add(entry);
     return entry.id;
   }
+
+  @override
+  Future<int> importEntries(List<ImportedTransaction> entries) async => 0;
 
   @override
   Future<void> deleteEntry(int id) async {}
@@ -106,6 +110,20 @@ void main() {
     expect(find.text('Groceries'), findsOneWidget);
     expect(find.text(r'+$3,200'), findsOneWidget);
     expect(find.text(r'-$42.30'), findsOneWidget);
+  });
+
+  testWidgets('coach screen offers the excel import action', (tester) async {
+    await _pumpApp(tester, _FakeRepository());
+
+    await tester.tap(find.byIcon(Icons.auto_awesome_rounded));
+    await _pumpFrames(tester);
+    await tester.scrollUntilVisible(
+      find.text('Import from Excel'),
+      320,
+    );
+
+    expect(find.text('Import from Excel'), findsOneWidget);
+    expect(find.text('Restore a PocketFin .xlsx backup'), findsOneWidget);
   });
 
   testWidgets('add entry saves a transaction', (tester) async {

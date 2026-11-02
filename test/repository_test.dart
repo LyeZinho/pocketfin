@@ -1,3 +1,6 @@
+import 'dart:io';
+
+import 'package:drift/drift.dart' show driftRuntimeOptions;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pocketfin/core/constants/categories.dart';
@@ -36,6 +39,35 @@ void main() {
 
     await repository.setMonthlyBudget(100000);
     expect(await repository.watchMonthlyBudget().first, 100000);
+  });
+
+  test('persists entries after reopening the database file', () async {
+    final previousWarning = driftRuntimeOptions.dontWarnAboutMultipleDatabases;
+    driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
+    addTearDown(
+      () => driftRuntimeOptions.dontWarnAboutMultipleDatabases = previousWarning,
+    );
+
+    final directory = await Directory.systemTemp.createTemp('pocketfin_db_');
+    final file = File('${directory.path}/pocketfin.sqlite');
+
+    var database = AppDatabase.forTesting(NativeDatabase(file));
+    await TransactionRepository(database).addEntry(
+      title: 'Rent',
+      category: TxCategory.home,
+      type: TxType.expense,
+      amountCents: 42000,
+      occurredAt: DateTime(2026, 11, 1, 9),
+    );
+    await database.close();
+
+    database = AppDatabase.forTesting(NativeDatabase(file));
+    final entries = await TransactionRepository(database).watchAll().first;
+    expect(entries, hasLength(1));
+    expect(entries.single.title, 'Rent');
+    await database.close();
+
+    await directory.delete(recursive: true);
   });
 
   test('deletes entries', () async {
