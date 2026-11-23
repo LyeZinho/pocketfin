@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:excel/excel.dart';
@@ -8,10 +9,7 @@ import '../models/imported_transaction.dart';
 import '../repositories/transaction_repository.dart';
 
 class ParsedImport {
-  const ParsedImport({
-    required this.entries,
-    required this.invalidRows,
-  });
+  const ParsedImport({required this.entries, required this.invalidRows});
 
   final List<ImportedTransaction> entries;
   final int invalidRows;
@@ -35,9 +33,7 @@ class ImportService {
     try {
       workbook = Excel.decodeBytes(bytes);
     } catch (_) {
-      throw const FormatException(
-        'That file is not a valid .xlsx workbook.',
-      );
+      throw const FormatException('That file is not a valid .xlsx workbook.');
     }
 
     final sheet = _pickSheet(workbook);
@@ -45,37 +41,47 @@ class ImportService {
       throw const FormatException('The workbook has no data.');
     }
 
-    final rows = sheet.rows;
+    return _parseRows([
+      for (final row in sheet.rows) [for (final data in row) data?.value],
+    ]);
+  }
+
+  /// Parses a CSV file (comma, semicolon or tab separated).
+  ParsedImport parseCsv(String content) {
+    return _parseRows(_csvRows(content));
+  }
+
+  ParsedImport _parseRows(List<List<CellValue?>> rows) {
     if (rows.isEmpty) {
-      throw const FormatException('The workbook has no data.');
+      throw const FormatException('The file has no data.');
     }
 
     final headerIndex = _findHeaderRow(rows);
     if (headerIndex == null) {
       throw const FormatException(
-        'Missing required columns: Date, Title, Category, Type and Amount.',
+        'Missing required columns: Date, Title and Amount.',
       );
     }
 
     final header = rows[headerIndex]
-        .map((data) => _text(data?.value).trim().toLowerCase())
+        .map((value) => _text(value).trim().toLowerCase())
         .toList();
 
     final dateIndex = _column(header, ['date', 'occurred at', 'when']);
-    final titleIndex =
-        _column(header, ['title', 'description', 'name', 'merchant']);
+    final titleIndex = _column(header, [
+      'title',
+      'description',
+      'name',
+      'merchant',
+    ]);
     final categoryIndex = _column(header, ['category']);
     final typeIndex = _column(header, ['type', 'kind']);
     final amountIndex = _column(header, ['amount', 'value', 'total']);
     final noteIndex = _column(header, ['note', 'notes', 'memo']);
 
-    if (dateIndex == null ||
-        titleIndex == null ||
-        categoryIndex == null ||
-        typeIndex == null ||
-        amountIndex == null) {
+    if (dateIndex == null || titleIndex == null || amountIndex == null) {
       throw const FormatException(
-        'Missing required columns: Date, Title, Category, Type and Amount.',
+        'Missing required columns: Date, Title and Amount.',
       );
     }
 
@@ -85,23 +91,25 @@ class ImportService {
     for (final row in rows.skip(headerIndex + 1)) {
       if (_isEmptyRow(row)) continue;
 
-      final title = _text(_cell(row, titleIndex)?.value).trim();
-      final category =
-          TxCategory.tryParse(_text(_cell(row, categoryIndex)?.value));
-      final type = _type(
-        _text(_cell(row, typeIndex)?.value),
-        category,
-      );
-      final amount = _amount(_cell(row, amountIndex)?.value);
-      final occurredAt = _date(_cell(row, dateIndex)?.value);
-      final note = noteIndex == null
+      final title = _text(_cell(row, titleIndex)).trim();
+      final rawCategory = categoryIndex == null
           ? ''
-          : _text(_cell(row, noteIndex)?.value).trim();
+          : _text(_cell(row, categoryIndex));
+      final parsedCategory = TxCategory.tryParse(rawCategory);
+      final signed = _signedAmount(_cell(row, amountIndex));
+      final type = _type(
+        typeIndex == null ? '' : _text(_cell(row, typeIndex)),
+        parsedCategory,
+        signed,
+      );
+      // Unknown categories (e.g. "Refund", "Freelance") fall back to Other
+      // instead of discarding the row.
+      final category = parsedCategory ?? TxCategory.other;
+      final amount = (signed.abs() * 100).round();
+      final occurredAt = _date(_cell(row, dateIndex));
+      final note = noteIndex == null ? '' : _text(_cell(row, noteIndex)).trim();
 
-      if (title.isEmpty ||
-          category == null ||
-          amount <= 0 ||
-          occurredAt == null) {
+      if (title.isEmpty || amount <= 0 || occurredAt == null) {
         invalid++;
         continue;
       }
@@ -123,9 +131,12 @@ class ImportService {
 
   Future<ImportSummary> importInto(
     TransactionRepository repository,
-    Uint8List bytes,
-  ) async {
-    final parsed = parseXlsx(bytes);
+    Uint8List bytes, {
+    bool isCsv = false,
+  }) async {
+    final parsed = isCsv
+        ? parseCsv(utf8.decode(bytes, allowMalformed: true))
+        : parseXlsx(bytes);
     final imported = await repository.importEntries(parsed.entries);
     return ImportSummary(
       imported: imported,
@@ -141,11 +152,11 @@ class ImportService {
     return workbook.tables.values.first;
   }
 
-  int? _findHeaderRow(List<List<Data?>> rows) {
+  int? _findHeaderRow(List<List<CellValue?>> rows) {
     final limit = rows.length < 5 ? rows.length : 5;
     for (var index = 0; index < limit; index++) {
       final header = rows[index]
-          .map((data) => _text(data?.value).trim().toLowerCase())
+          .map((value) => _text(value).trim().toLowerCase())
           .toSet();
       if (header.contains('date') &&
           header.contains('amount') &&
@@ -166,15 +177,65 @@ class ImportService {
     return null;
   }
 
-  Data? _cell(List<Data?> row, int index) {
+  CellValue? _cell(List<CellValue?> row, int index) {
     if (index < 0 || index >= row.length) return null;
     return row[index];
   }
 
-  bool _isEmptyRow(List<Data?> row) {
-    return row.every(
-      (data) => data?.value == null || _text(data?.value).trim().isEmpty,
+  bool _isEmptyRow(List<CellValue?> row) {
+    return row.every((value) => _text(value).trim().isEmpty);
+  }
+
+  List<List<CellValue?>> _csvRows(String content) {
+    final text = content.startsWith('\uFEFF') ? content.substring(1) : content;
+    final firstLine = text.split('\n').first;
+    final delimiter = [',', ';', '\t'].reduce(
+      (a, b) => b.allMatches(firstLine).length > a.allMatches(firstLine).length
+          ? b
+          : a,
     );
+
+    final rows = <List<CellValue?>>[];
+    var row = <CellValue?>[];
+    final field = StringBuffer();
+    var quoted = false;
+
+    void endField() {
+      row.add(TextCellValue(field.toString()));
+      field.clear();
+    }
+
+    void endRow() {
+      endField();
+      rows.add(row);
+      row = <CellValue?>[];
+    }
+
+    for (var i = 0; i < text.length; i++) {
+      final c = text[i];
+      if (quoted) {
+        if (c == '"') {
+          if (i + 1 < text.length && text[i + 1] == '"') {
+            field.write('"');
+            i++;
+          } else {
+            quoted = false;
+          }
+        } else {
+          field.write(c);
+        }
+      } else if (c == '"') {
+        quoted = true;
+      } else if (c == delimiter) {
+        endField();
+      } else if (c == '\n') {
+        endRow();
+      } else if (c != '\r') {
+        field.write(c);
+      }
+    }
+    if (field.isNotEmpty || row.isNotEmpty) endRow();
+    return rows;
   }
 
   String _text(CellValue? value) {
@@ -190,27 +251,49 @@ class ImportService {
     };
   }
 
-  int _amount(CellValue? value) {
-    if (value is DoubleCellValue) {
-      return (value.value.abs() * 100).round();
-    }
-    if (value is IntCellValue) {
-      return value.value.abs() * 100;
-    }
-    final cleaned = _text(value)
-        .replaceAll(RegExp(r'[\s,$€£]'), '')
+  double _signedAmount(CellValue? value) {
+    if (value is DoubleCellValue) return value.value;
+    if (value is IntCellValue) return value.value.toDouble();
+    var cleaned = _text(value)
+        .replaceAll(RegExp(r'[\s$€£]|EUR'), '')
         .replaceAll('(', '-')
         .replaceAll(')', '');
-    final parsed = double.tryParse(cleaned);
-    if (parsed == null) return 0;
-    return (parsed.abs() * 100).round();
+    // Decimal separator: the last of '.' or ',' wins; the other is grouping.
+    final comma = cleaned.lastIndexOf(',');
+    final dot = cleaned.lastIndexOf('.');
+    if (comma > dot) {
+      cleaned = cleaned.replaceAll('.', '').replaceAll(',', '.');
+    } else {
+      cleaned = cleaned.replaceAll(',', '');
+    }
+    return double.tryParse(cleaned) ?? 0;
   }
 
-  TxType _type(String value, TxCategory? category) {
+  TxType _type(String value, TxCategory? category, double signedAmount) {
     return switch (value.trim().toLowerCase()) {
-      'income' || 'in' || 'credit' => TxType.income,
-      'expense' || 'out' || 'debit' => TxType.expense,
-      _ => category == TxCategory.salary ? TxType.income : TxType.expense,
+      'income' ||
+      'in' ||
+      'credit' ||
+      'revenue' ||
+      'deposit' ||
+      '+' ||
+      'receita' ||
+      'entrada' => TxType.income,
+      'expense' ||
+      'out' ||
+      'debit' ||
+      '-' ||
+      'despesa' ||
+      'saida' ||
+      'saída' => TxType.expense,
+      // Unknown/blank type: the sign decides (bank-statement style);
+      // positive = income, negative = expense.
+      _ =>
+        signedAmount < 0
+            ? TxType.expense
+            : signedAmount > 0
+            ? TxType.income
+            : TxType.expense,
     };
   }
 

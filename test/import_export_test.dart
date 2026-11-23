@@ -29,6 +29,7 @@ TransactionEntry sample({
 }
 
 void main() {
+  importSignTests();
   final entries = [
     sample(
       id: 1,
@@ -94,5 +95,24 @@ void main() {
       () => ImportService().parseXlsx(Uint8List.fromList([1, 2, 3])),
       throwsA(isA<FormatException>()),
     );
+  });
+}
+
+void importSignTests() {
+  test('csv without type column: positive = income, negative = expense', () {
+    const csv =
+        'Date;Description;Amount\n'
+        '2026-11-01;Salário;"1.500,00"\n'
+        '2026-11-02;Café;-4,50\n'
+        '2026-11-03;Reembolso;20.00\n';
+    final parsed = ImportService().parseCsv(csv);
+    expect(parsed.invalidRows, 0);
+    final types = parsed.entries.map((e) => e.type).toList();
+    expect(types, [TxType.income, TxType.expense, TxType.income]);
+    expect(parsed.entries.map((e) => e.amountCents).toList(), [
+      150000,
+      450,
+      2000,
+    ]);
   });
 }
