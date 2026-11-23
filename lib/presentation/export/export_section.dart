@@ -46,10 +46,7 @@ class _ExportSectionState extends ConsumerState<ExportSection> {
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
           child: Row(
             children: [
-              Text(
-                'Range',
-                style: AppText.body(17, color: AppColors.muted),
-              ),
+              Text('Range', style: AppText.body(17, color: AppColors.muted)),
               const SizedBox(width: 12),
               Expanded(
                 child: Text(
@@ -152,10 +149,7 @@ class _ExportSectionState extends ConsumerState<ExportSection> {
                   ],
                 ),
               ),
-              const Icon(
-                Icons.chevron_right_rounded,
-                color: AppColors.muted,
-              ),
+              const Icon(Icons.chevron_right_rounded, color: AppColors.muted),
             ],
           ),
         ),
@@ -173,15 +167,18 @@ class _ExportSectionState extends ConsumerState<ExportSection> {
       final file = await FilePicker.pickFile(
         dialogTitle: 'Import PocketFin data',
         type: FileType.custom,
-        allowedExtensions: const ['xlsx'],
+        allowedExtensions: const ['xlsx', 'csv'],
       );
       if (file == null) return;
 
       setState(() => _importing = true);
       final bytes = await file.readAsBytes();
-      final summary = await ref.read(importServiceProvider).importInto(
+      final summary = await ref
+          .read(importServiceProvider)
+          .importInto(
             ref.read(repositoryProvider),
             bytes,
+            isCsv: file.name.toLowerCase().endsWith('.csv'),
           );
       if (!mounted) return;
 
@@ -192,7 +189,9 @@ class _ExportSectionState extends ConsumerState<ExportSection> {
         if (summary.invalid > 0)
           '${summary.invalid} invalid row${summary.invalid == 1 ? '' : 's'} skipped',
       ];
-      _showMessage(parts.isEmpty ? 'Nothing new to import.' : parts.join(' · '));
+      _showMessage(
+        parts.isEmpty ? 'Nothing new to import.' : parts.join(' · '),
+      );
     } on FormatException catch (error) {
       _showMessage(error.message);
     } catch (error) {
@@ -204,9 +203,8 @@ class _ExportSectionState extends ConsumerState<ExportSection> {
 
   void _showMessage(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<void> _export(
@@ -216,31 +214,24 @@ class _ExportSectionState extends ConsumerState<ExportSection> {
   ) async {
     setState(() => _busy = true);
     try {
-      final path = await ref.read(exportServiceProvider).exportXlsx(
-            entries: entries,
-            from: from,
-            to: to,
-          );
+      final path = await ref
+          .read(exportServiceProvider)
+          .exportXlsx(entries: entries, from: from, to: to);
       if (!mounted) return;
       try {
         await SharePlus.instance.share(
-          ShareParams(
-            files: [XFile(path)],
-            subject: 'PocketFin export',
-          ),
+          ShareParams(files: [XFile(path)], subject: 'PocketFin export'),
         );
       } catch (_) {
         // Sharing is best effort; the file is already saved.
       }
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Exported to $path')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Exported to $path')));
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Export failed: $error')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Export failed: $error')));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
